@@ -1,0 +1,193 @@
+<?php 
+	include("accounts_session.php");
+	$user = $_SESSION['login_user'];
+    if($_SERVER['REQUEST_METHOD']=='POST'){	
+        $office = $_POST['office'];
+        $month = $_POST['month'];
+        $year = $_POST['year'];
+           
+        $month1 = $year.'-'.$month;       
+        $obdate = $year.'-'.$month.'-01';
+
+               
+        $subheadq = mysqli_query($connection,"SELECT DISTINCT SubID,SubHead, SubHeadModule FROM acc_subhead,acc_cashbook WHERE SubID = subheadid AND officeid = '$office' AND subheadid != 14 AND LEFT(date,7) = '$month1'");
+        $subheadqcount = mysqli_num_rows($subheadq);
+        
+         
+        $i = 0;
+        $cstring = '';
+        $sstring = '';
+        $casestring = '';
+        
+        $x = 'A';
+        while($row2 = mysqli_fetch_assoc($subheadq)){
+            $subid[$i] = $row2['SubID'];
+            $subhead[$i] = $row2['SubHead'];
+            $subheadmodule[$i] = $row2['SubHeadModule'];
+            
+            if($i < ($subheadqcount-1)){
+                if($subheadmodule[$i] != 3){
+                    $cstring .= "coalesce(".$x.", 0) as ".$x.",";
+                    $sstring .= "sum(".$x.") as ".$x.",";
+                    $casestring .= "case when subhead = '".$subid[$i]."' then receipt end as ".$x.",";
+                }
+                else{
+                    $cstring .= "coalesce(".$x.", 0) as ".$x.",";
+                    $sstring .= "sum(".$x.") as ".$x.",";
+                    $casestring .= "case when subhead = '".$subid[$i]."' then receipt end as ".$x.",";
+                    $x++;
+                    $cstring .= "coalesce(".$x.", 0) as ".$x.",";
+                    $sstring .= "sum(".$x.") as ".$x.",";
+                    $casestring .= "case when subhead = '".$subid[$i]."' then payment end as ".$x.",";
+                }
+                $x++;
+                
+            }else{
+                if($subheadmodule[$i] != 3){
+                    $cstring .= "coalesce(".$x.", 0) as ".$x."";
+                    $sstring .= "sum(".$x.") as ".$x."";
+                    $casestring .= "case when subhead = '".$subid[$i]."' then receipt end as ".$x."";
+                }
+                else{
+                    $cstring .= "coalesce(".$x.", 0) as ".$x.",";
+                    $sstring .= "sum(".$x.") as ".$x.",";
+                    $casestring .= "case when subhead = '".$subid[$i]."' then receipt end as ".$x.",";
+                    $x++;
+                    $cstring .= "coalesce(".$x.", 0) as ".$x."";
+                    $sstring .= "sum(".$x.") as ".$x.""; 
+                    $casestring .= "case when subhead = '".$subid[$i]."' then payment end as ".$x."";
+                }
+                $x++;    
+            }
+            $i++;
+        } 
+        
+        $finalq="select memid,".$cstring."    
+            from (select
+                memid,".$sstring."
+            from (select
+                A.*,".$casestring."
+            from (SELECT memid,max(subheadid) AS subhead,SUM(receiptcash) AS receipt,SUM(paymentcash) AS payment FROM acc_cashbook, acc_transactions 
+                WHERE acc_cashbook.TransID = acc_transactions.TransID AND acc_transactions.TransStatus = 1 AND officeid = '$office' AND subheadid != 14 AND LEFT(date,7) = '$month1' GROUP BY subheadid,memid) AS A) AS B GROUP BY memid) AS V";
+        //echo $finalq;
+        //echo "|";
+        $result3=mysqli_query($connection,$finalq);
+
+        echo "<tr>";
+        $i = 0;
+        echo "<th style='text-align: center;' rowspan='2'>MemID</th>";
+        echo "<th style='text-align: center;' rowspan='2'>MemberName</th>";
+        while ($i <= ($subheadqcount-1)){
+            if($subheadmodule[$i] == 3)
+                echo "<th style='text-align: center;' colspan='3'>".$subhead[$i]."</th>";
+            else if ($subheadmodule[$i] == 4)
+                echo "<th style='text-align: center;' colspan='2'>".$subhead[$i]."</th>";
+            else
+                echo "<th style='text-align: center;' rowspan='2'>".$subhead[$i]."</th>"; 
+            $i++; 
+        }
+        echo "</tr><tr>";
+        $i=0;
+        while ($i <= ($subheadqcount-1)){
+            if($subheadmodule[$i] == 4 ){
+                echo "<th style='text-align: center;'>Receipt</th>";
+                echo "<th style='text-align: center;'>Total</th>";
+            }else if($subheadmodule[$i] == 3){
+                echo "<th style='text-align: center;'>Receipt</th>";
+                echo "<th style='text-align: center;'>Payment</th>";
+                echo "<th style='text-align: center;'>Total</th>";
+            }
+            $i++;
+        } 
+        echo "</tr>";
+        echo "|";
+        
+        while ($row3 = mysqli_fetch_assoc($result3)){
+            $x = 'A';
+            echo "<tr>";
+            echo "<td align='left'>".$row3['memid']."</td>";
+            $memid = $row3['memid'];
+            $memq = mysqli_query($connection,"SELECT memname FROM members WHERE memid = '$memid'");
+            $memname = mysqli_fetch_assoc($memq);
+            echo "<td align='left'>".$memname['memname']."</td>";
+            $j = 0;
+            $i = 0;            
+            while ($j <= ($subheadqcount)){
+                if($subheadmodule[$i] == 4 ){
+                    echo "<td align='right'>".$row3[$x]."</td>";
+                    $total[$j] =  $total[$j] + $row3[$x];
+
+                    $depno = mysqli_query($connection, "SELECT depositno FROM acc_deposits WHERE memid = '$memid' AND subheadid = '$subid[$i]'");
+                    $depno = mysqli_fetch_assoc($depno);
+                    $depno = $depno['depositno'];
+                    $ledgerobs = mysqli_query($connection,"SELECT sum(receiptcash) as rcash, sum(receiptadj) as radj, sum(paymentcash) as pcash, sum(paymentadj) as padj FROM acc_cashbook, acc_transactions 
+                                WHERE accno = '$depno' AND subheadid = '$subid[$i]' AND acc_transactions.TransID = acc_cashbook.TransID AND  acc_transactions.TransStatus = 1
+                                AND date < '$obdate' GROUP BY accno");  
+                    $ledgerobs = mysqli_fetch_assoc($ledgerobs);
+                    $ledobs = $ledgerobs['rcash'] + $ledgerobs['radj'] - $ledgerobs['pcash'] - $ledgerobs['padj'];
+
+                    $ledtot = $ledobs + $row3[$x];
+                    $ledtotgrand[$i] = $ledtotgrand[$i] + $ledtot;
+                    echo "<td align='right'>".number_format($ledtot,2, '.', '')."</td>";                    
+                }
+                else if($subheadmodule[$i] == 3 ){
+                    echo "<td align='right'>".$row3[$x]."</td>";
+                    $total[$j] =  $total[$j] + $row3[$x];
+                    $receipt = $row3[$x];
+
+                    $loanno = mysqli_query($connection, "SELECT loanno FROM acc_loans WHERE memid = '$memid' AND subheadid = '$subid[$i]'");
+                    $loanno = mysqli_fetch_assoc($loanno);
+                    echo $loanno = $loanno['loanno'];
+                    $ledgerobs = mysqli_query($connection,"SELECT sum(receiptcash) as rcash, sum(receiptadj) as radj, sum(paymentcash) as pcash, sum(paymentadj) as padj FROM acc_cashbook, acc_transactions 
+                                WHERE accno = '$loanno' AND subheadid = '$subid[$i]' AND acc_transactions.TransID = acc_cashbook.TransID AND  acc_transactions.TransStatus = 1
+                                AND date < '$obdate' GROUP BY accno");  
+                    $ledgerobs = mysqli_fetch_assoc($ledgerobs);
+                    $ledobs = $ledgerobs['pcash'] + $ledgerobs['padj'] - $ledgerobs['rcash'] - $ledgerobs['radj'];
+
+                    $x++;
+                    $j++;
+                    $i++;
+                    echo "<td align='right'>".$row3[$x]."</td>";
+                    $total[$j] =  $total[$j] + $row3[$x];
+                    $payment = $row3[$x];
+
+                    
+                    $ledtot = $ledobs - $receipt + $payment;
+                    $ledtotgrand[$i] = $ledtotgrand[$i] + $ledtot;
+                    echo "<td align='right'>".number_format($ledtot,2, '.', '')."</td>";
+                }
+                else{
+                    echo "<td align='right'>".$row3[$x]."</td>";
+                    $total[$j] =  $total[$j] + $row3[$x];
+                }
+                $x++;
+                $j++;
+                $i++;
+            } 
+            echo "</tr>";
+            
+        }
+        $j = 0;
+        echo "<tr>";
+        echo "<td align='left' colspan='2'>Total</td>";
+        while ($j <= ($subheadqcount)){            
+            if($subheadmodule[$j] == 3 ){
+                    echo "<td align='right'>".number_format($total[$j],2, '.', '')."</td>";
+                    $j++;
+                    echo "<td align='right'>".number_format($total[$j],2, '.', '')."</td>";
+                    
+                    echo "<td align='right'>".number_format($ledtotgrand[$j],2, '.', '')."</td>";
+                }
+            else if ($subheadmodule[$j] == 4 ){
+                    echo "<td align='right'>".number_format($total[$j],2, '.', '')."</td>";
+                    
+                    echo "<td align='right'>".number_format($ledtotgrand[$j],2, '.', '')."</td>";
+            }
+            else{
+                    echo "<td align='right'>".number_format($total[$j],2, '.', '')."</td>";
+            }
+            $j++;
+        }
+        echo "</tr>";
+    }
+?>
